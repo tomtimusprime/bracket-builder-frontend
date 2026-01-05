@@ -2,10 +2,13 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
+	import ConfirmModal from '$lib/ConfirmModal.svelte';
 
 	let brackets = [];
 	let loading = true;
 	let error = null;
+	let showDeleteModal = false;
+	let bracketToDelete = null;
 
 	onMount(async () => {
 		try {
@@ -25,17 +28,29 @@
 		goto(`/bracket/${id}`);
 	}
 
-	async function handleDeleteBracket(id, event) {
+	function openDeleteModal(id, event) {
 		event.stopPropagation();
-		if (!confirm('Are you sure you want to delete this bracket? This action cannot be undone.')) {
-			return;
-		}
-		try {
-			await api.deleteBracket(id);
-			brackets = brackets.filter(b => b.id !== id);
-		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to delete bracket');
-		}
+		bracketToDelete = id;
+		showDeleteModal = true;
+	}
+
+	function handleDeleteConfirm() {
+		if (!bracketToDelete) return;
+		const id = bracketToDelete;
+		bracketToDelete = null;
+		
+		api.deleteBracket(id)
+			.then(() => {
+				brackets = brackets.filter(b => b.id !== id);
+			})
+			.catch((e) => {
+				error = e instanceof Error ? e.message : 'Failed to delete bracket';
+				setTimeout(() => { error = null; }, 5000);
+			});
+	}
+
+	function handleDeleteCancel() {
+		bracketToDelete = null;
 	}
 </script>
 
@@ -71,7 +86,7 @@
 						<h3>{bracket.name}</h3>
 						<button
 							class="btn-delete"
-							on:click={(e) => handleDeleteBracket(bracket.id, e)}
+							on:click={(e) => openDeleteModal(bracket.id, e)}
 							title="Delete bracket"
 						>
 							🗑️
@@ -87,6 +102,17 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmModal
+	bind:show={showDeleteModal}
+	title="Delete Bracket"
+	message="Are you sure you want to delete this bracket? This action cannot be undone."
+	confirmText="Delete"
+	cancelText="Cancel"
+	confirmClass="btn-danger"
+	onConfirm={handleDeleteConfirm}
+	onCancel={handleDeleteCancel}
+/>
 
 <style>
 	.container {
@@ -244,6 +270,89 @@
 	.rounds {
 		color: #666;
 		font-size: 0.9rem;
+	}
+
+	/* Mobile Responsive Styles */
+	@media (max-width: 768px) {
+		.container {
+			padding: 1rem;
+		}
+
+		header {
+			margin-bottom: 2rem;
+		}
+
+		h1 {
+			font-size: 2rem;
+		}
+
+		.subtitle {
+			font-size: 1rem;
+		}
+
+		.actions {
+			margin-bottom: 1.5rem;
+		}
+
+		.btn {
+			width: 100%;
+			padding: 0.875rem 1.5rem;
+			font-size: 1rem;
+		}
+
+		.brackets-grid {
+			grid-template-columns: 1fr;
+			gap: 1rem;
+		}
+
+		.bracket-card {
+			padding: 1.25rem;
+		}
+
+		.bracket-card h3 {
+			font-size: 1.25rem;
+		}
+
+		.btn-delete {
+			font-size: 1.1rem;
+			padding: 0.3rem 0.4rem;
+			min-width: 44px;
+			min-height: 44px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+
+		.topic {
+			font-size: 0.9rem;
+		}
+
+		.meta {
+			flex-wrap: wrap;
+			gap: 0.5rem;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.container {
+			padding: 0.75rem;
+		}
+
+		h1 {
+			font-size: 1.75rem;
+		}
+
+		.subtitle {
+			font-size: 0.9rem;
+		}
+
+		.bracket-card {
+			padding: 1rem;
+		}
+
+		.bracket-card h3 {
+			font-size: 1.1rem;
+		}
 	}
 </style>
 

@@ -19,12 +19,22 @@
 
 	function addItem() {
 		if (bracketSize && items.length >= bracketSize) {
-			error = `Maximum ${bracketSize} items allowed for this bracket size`;
+			error = `Bracket is full! Maximum ${bracketSize} items allowed for this bracket size.`;
 			return;
 		}
 		items = [...items, ''];
 		error = null;
 	}
+
+	$: remainingItems = bracketSize ? (() => {
+		const validItems = items.filter(item => item.trim() !== '').length;
+		return bracketSize - validItems;
+	})() : null;
+
+	$: isBracketFull = bracketSize ? (() => {
+		const validItems = items.filter(item => item.trim() !== '').length;
+		return validItems >= bracketSize;
+	})() : false;
 
 	function removeItem(index) {
 		items = items.filter((_, i) => i !== index);
@@ -219,9 +229,29 @@
 					</div>
 				{/each}
 			</div>
-			<button type="button" class="btn-add" on:click={addItem}>
+			{#if bracketSize && remainingItems !== null}
+				<div class="items-counter-container">
+					{#if remainingItems > 0}
+						<span class="items-counter">{remainingItems} {remainingItems === 1 ? 'item' : 'items'} remaining</span>
+					{:else}
+						<span class="items-counter items-counter-full">✓ Bracket is full</span>
+					{/if}
+				</div>
+			{/if}
+			<button 
+				type="button" 
+				class="btn-add" 
+				on:click={addItem}
+				disabled={isBracketFull}
+				title={isBracketFull ? `Bracket is full. Maximum ${bracketSize} items allowed.` : 'Add another item'}
+			>
 				+ Add Item
 			</button>
+			{#if isBracketFull}
+				<p class="bracket-full-message">
+					✓ Bracket is full! You have reached the maximum of {bracketSize} items.
+				</p>
+			{/if}
 		</div>
 
 		{#if error}
@@ -309,7 +339,28 @@
 	}
 
 	.items-list {
-		margin-bottom: 1rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.items-counter-container {
+		margin-bottom: 0.75rem;
+		text-align: center;
+	}
+
+	.items-counter {
+		display: inline-block;
+		font-size: 0.9rem;
+		color: #666;
+		font-weight: 500;
+		padding: 0.5rem 1rem;
+		background: #f3f4f6;
+		border-radius: 6px;
+	}
+
+	.items-counter-full {
+		color: #10b981;
+		font-weight: 600;
+		background: #d1fae5;
 	}
 
 	.item-input {
@@ -321,6 +372,16 @@
 
 	.item-input input {
 		flex: 1;
+		padding: 0.75rem;
+		border: 2px solid #e5e7eb;
+		border-radius: 6px;
+		font-size: 1rem;
+		min-width: 0; /* Allow input to shrink */
+	}
+
+	.item-input input:focus {
+		outline: none;
+		border-color: #667eea;
 	}
 
 	.btn-remove {
@@ -354,9 +415,28 @@
 		transition: all 0.2s;
 	}
 
-	.btn-add:hover {
+	.btn-add:hover:not(:disabled) {
 		background: #e5e7eb;
 		border-color: #9ca3af;
+	}
+
+	.btn-add:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+		background: #f3f4f6;
+		border-color: #d1d5db;
+	}
+
+	.bracket-full-message {
+		margin-top: 0.75rem;
+		padding: 0.75rem;
+		background: #d1fae5;
+		border: 1px solid #10b981;
+		border-radius: 6px;
+		color: #065f46;
+		font-size: 0.9rem;
+		font-weight: 500;
+		text-align: center;
 	}
 
 	.error {
@@ -507,6 +587,148 @@
 		color: #667eea;
 		border: 1px solid #667eea;
 		font-weight: 500;
+	}
+
+	/* Mobile Responsive Styles */
+	@media (max-width: 768px) {
+		.container {
+			padding: 1rem;
+		}
+
+		header {
+			margin-bottom: 1.5rem;
+		}
+
+		h1 {
+			font-size: 1.75rem;
+		}
+
+		.subtitle {
+			font-size: 1rem;
+		}
+
+		.form-group {
+			margin-bottom: 1.25rem;
+		}
+
+		.form-group label {
+			font-size: 0.95rem;
+		}
+
+		.form-group input,
+		.form-group select {
+			font-size: 1rem;
+			padding: 0.75rem;
+		}
+
+		.items-list {
+			gap: 0.4rem;
+			margin-bottom: 0.6rem;
+		}
+
+		.item-input {
+			gap: 0.4rem;
+			margin-bottom: 0.4rem;
+		}
+
+		.item-input input {
+			padding: 0.5rem;
+			font-size: 0.9rem;
+		}
+
+		.btn-remove {
+			width: 1.75rem;
+			height: 1.75rem;
+			font-size: 1.1rem;
+			flex-shrink: 0;
+		}
+
+		.btn-add {
+			padding: 0.5rem;
+			font-size: 0.9rem;
+			min-height: 40px;
+		}
+
+		.btn-populate {
+			padding: 0.5rem 0.75rem;
+			font-size: 0.9rem;
+		}
+
+		.btn-premade {
+			padding: 0.5rem 0.6rem;
+			font-size: 0.9rem;
+		}
+
+		.actions {
+			flex-direction: column;
+			gap: 0.75rem;
+		}
+
+		.btn {
+			width: 100%;
+			padding: 0.875rem 1.5rem;
+			font-size: 1rem;
+		}
+
+		.premade-section {
+			padding: 1.25rem;
+			margin: 1.5rem 0;
+		}
+
+		.premade-controls {
+			grid-template-columns: 1fr;
+			gap: 1rem;
+		}
+
+		.btn-populate {
+			width: 100%;
+			white-space: normal;
+			padding: 0.6rem 1rem;
+			font-size: 0.95rem;
+		}
+
+		.btn-premade {
+			padding: 0.6rem 0.75rem;
+			font-size: 0.95rem;
+		}
+
+		.category-tags {
+			gap: 0.4rem;
+		}
+
+		.category-tag {
+			font-size: 0.8rem;
+			padding: 0.35rem 0.7rem;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.container {
+			padding: 0.75rem;
+		}
+
+		h1 {
+			font-size: 1.5rem;
+		}
+
+		.subtitle {
+			font-size: 0.9rem;
+		}
+
+		.form-group input,
+		.form-group select {
+			font-size: 0.95rem;
+			padding: 0.7rem;
+		}
+
+		.premade-section {
+			padding: 1rem;
+		}
+
+		.category-tag {
+			font-size: 0.75rem;
+			padding: 0.3rem 0.6rem;
+		}
 	}
 </style>
 

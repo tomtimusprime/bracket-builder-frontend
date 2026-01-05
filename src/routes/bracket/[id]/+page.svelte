@@ -3,6 +3,7 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { api } from "$lib/api";
+  import ConfirmModal from "$lib/ConfirmModal.svelte";
 
   let bracket = null;
   let loading = true;
@@ -10,6 +11,9 @@
   let updatingMatch = null;
   let hoveredItemId = null;
   let resetting = false;
+  let showResetModal = false;
+  let showClearWinnerModal = false;
+  let matchToClear = null;
 
   $: bracketId = $page.params.id;
   $: finalWinner =
@@ -39,41 +43,87 @@
     }
   }
 
-  async function selectWinner(match, winnerId) {
-    if (!bracket || match.winner_id) return;
+   async function selectWinner(match, winnerId, event) {
+     if (!bracket || match.winner_id) return;
 
-    hoveredItemId = null; // Clear hover state
-    updatingMatch = match.id;
-    error = null;
-    try {
-      await api.updateMatch(bracket.id, match.id, { winner_id: winnerId });
-      // Reload the bracket to get fresh data from the server (including new rounds)
-      await loadBracket();
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to update match";
-      console.error("Error selecting winner:", e);
-    } finally {
-      updatingMatch = null;
-    }
+     hoveredItemId = null; // Clear hover state
+     updatingMatch = match.id;
+     error = null;
+     
+     // Save scroll position and find the clicked match element
+     const bracketContainer = document.querySelector('.traditional-bracket');
+     let scrollLeft = 0;
+     let matchOffsetLeft = 0;
+     
+     if (bracketContainer) {
+       scrollLeft = bracketContainer.scrollLeft;
+       // Try to find the match element from the event
+       if (event && event.currentTarget) {
+         const matchElement = event.currentTarget.closest('.match');
+         if (matchElement) {
+           const containerRect = bracketContainer.getBoundingClientRect();
+           const matchRect = matchElement.getBoundingClientRect();
+           matchOffsetLeft = matchRect.left - containerRect.left + scrollLeft;
+         }
+       }
+     }
+     
+     try {
+       await api.updateMatch(bracket.id, match.id, { winner_id: winnerId });
+       // Reload the bracket to get fresh data from the server (including new rounds)
+       await loadBracket();
+       
+       // Restore scroll position after DOM updates
+       setTimeout(() => {
+         const updatedContainer = document.querySelector('.traditional-bracket');
+         if (updatedContainer) {
+           if (matchOffsetLeft > 0) {
+             // Try to scroll the match back into view (center it)
+             updatedContainer.scrollLeft = matchOffsetLeft - (updatedContainer.clientWidth / 2);
+           } else {
+             // Fallback to saved scroll position
+             updatedContainer.scrollLeft = scrollLeft;
+           }
+         }
+       }, 100);
+     } catch (e) {
+       error = e instanceof Error ? e.message : "Failed to update match";
+       console.error("Error selecting winner:", e);
+     } finally {
+       updatingMatch = null;
+     }
+   }
+
+  function openClearWinnerModal(match) {
+    if (!bracket || !match.winner_id) return;
+    matchToClear = match;
+    showClearWinnerModal = true;
   }
 
-  async function clearWinner(match) {
-    if (!bracket || !match.winner_id) return;
+  async function handleClearWinnerConfirm() {
+    if (!bracket || !matchToClear) return;
 
-    if (
-      !confirm(
-        "Are you sure you want to clear this match winner? This will also remove any subsequent rounds that depend on this match."
-      )
-    ) {
-      return;
-    }
-
-    updatingMatch = match.id;
+    updatingMatch = matchToClear.id;
     error = null;
+    
+    // Save scroll position before update
+    const bracketContainer = document.querySelector('.traditional-bracket');
+    const scrollLeft = bracketContainer ? bracketContainer.scrollLeft : 0;
+    
+    const match = matchToClear;
+    matchToClear = null;
+    
     try {
       await api.clearMatchWinner(bracket.id, match.id);
       // Reload the bracket to get fresh data from the server
       await loadBracket();
+      
+      // Restore scroll position after a brief delay to allow DOM update
+      setTimeout(() => {
+        if (bracketContainer) {
+          bracketContainer.scrollLeft = scrollLeft;
+        }
+      }, 50);
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to clear match winner";
       console.error("Error clearing match winner:", e);
@@ -82,15 +132,17 @@
     }
   }
 
-  async function resetBracket() {
-    if (
-      !bracket ||
-      !confirm(
-        "Are you sure you want to reset this bracket? All progress will be lost."
-      )
-    ) {
-      return;
-    }
+  function handleClearWinnerCancel() {
+    matchToClear = null;
+  }
+
+  function openResetModal() {
+    if (!bracket) return;
+    showResetModal = true;
+  }
+
+  async function handleResetConfirm() {
+    if (!bracket) return;
 
     resetting = true;
     error = null;
@@ -106,6 +158,10 @@
     } finally {
       resetting = false;
     }
+  }
+
+  function handleResetCancel() {
+    // Modal will close automatically
   }
 
   function getMatchesByRound(round) {
@@ -213,7 +269,7 @@
         <button class="btn-back" on:click={() => goto("/")}>← Back</button>
         <button
           class="btn-reset"
-          on:click={resetBracket}
+          on:click={openResetModal}
           disabled={resetting || bracket.status === "draft"}
           title="Reset bracket to start over"
         >
@@ -225,9 +281,9 @@
       <div class="status-badge status-{bracket.status}">{bracket.status}</div>
     </header>
 
-    <!-- Traditional Bracket Layout (always used) -->
-    <div class="traditional-bracket">
-      <div class="bracket-container-horizontal">
+     <!-- Traditional Bracket Layout (always used) -->
+     <div class="traditional-bracket">
+       <div class="bracket-container-horizontal">
         <!-- Left Side - Round 1 -->
         <div class="bracket-column">
           {#if getLeftSideMatches(1).length > 0}
@@ -246,7 +302,7 @@
                       {#if match.winner_id}
                         <button
                           class="btn-clear-winner"
-                          on:click={() => clearWinner(match)}
+                          on:click={() => openClearWinnerModal(match)}
                           disabled={updatingMatch === match.id}
                           title="Clear winner to change selection"
                         >
@@ -262,10 +318,10 @@
                           : ''} {hoveredItemId === match.item1?.id
                           ? 'hovered'
                           : ''}"
-                        on:click={() =>
+                        on:click={(e) =>
                           match.item1 &&
                           !match.winner_id &&
-                          selectWinner(match, match.item1.id)}
+                          selectWinner(match, match.item1.id, e)}
                         on:mouseenter={() =>
                           match.item1 &&
                           !match.winner_id &&
@@ -296,10 +352,10 @@
                           : ''} {hoveredItemId === match.item2?.id
                           ? 'hovered'
                           : ''}"
-                        on:click={() =>
+                        on:click={(e) =>
                           match.item2 &&
                           !match.winner_id &&
-                          selectWinner(match, match.item2.id)}
+                          selectWinner(match, match.item2.id, e)}
                         on:mouseenter={() =>
                           match.item2 &&
                           !match.winner_id &&
@@ -351,7 +407,7 @@
                         {#if match.winner_id}
                           <button
                             class="btn-clear-winner"
-                            on:click={() => clearWinner(match)}
+                            on:click={() => openClearWinnerModal(match)}
                             disabled={updatingMatch === match.id}
                             title="Clear winner to change selection"
                           >
@@ -367,10 +423,10 @@
                             : ''} {hoveredItemId === match.item1?.id
                             ? 'hovered'
                             : ''}"
-                          on:click={() =>
+                          on:click={(e) =>
                             match.item1 &&
                             !match.winner_id &&
-                            selectWinner(match, match.item1.id)}
+                            selectWinner(match, match.item1.id, e)}
                           on:mouseenter={() =>
                             match.item1 &&
                             !match.winner_id &&
@@ -401,10 +457,10 @@
                             : ''} {hoveredItemId === match.item2?.id
                             ? 'hovered'
                             : ''}"
-                          on:click={() =>
+                          on:click={(e) =>
                             match.item2 &&
                             !match.winner_id &&
-                            selectWinner(match, match.item2.id)}
+                            selectWinner(match, match.item2.id, e)}
                           on:mouseenter={() =>
                             match.item2 &&
                             !match.winner_id &&
@@ -460,10 +516,10 @@
                     : ''} {hoveredItemId === finalMatch.item1?.id
                     ? 'hovered'
                     : ''}"
-                  on:click={() =>
-                    finalMatch.item1 &&
-                    !finalMatch.winner_id &&
-                    selectWinner(finalMatch, finalMatch.item1.id)}
+                    on:click={(e) =>
+                      finalMatch.item1 &&
+                      !finalMatch.winner_id &&
+                      selectWinner(finalMatch, finalMatch.item1.id, e)}
                   on:mouseenter={() =>
                     finalMatch.item1 &&
                     !finalMatch.winner_id &&
@@ -494,10 +550,10 @@
                     : ''} {hoveredItemId === finalMatch.item2?.id
                     ? 'hovered'
                     : ''}"
-                  on:click={() =>
-                    finalMatch.item2 &&
-                    !finalMatch.winner_id &&
-                    selectWinner(finalMatch, finalMatch.item2.id)}
+                    on:click={(e) =>
+                      finalMatch.item2 &&
+                      !finalMatch.winner_id &&
+                      selectWinner(finalMatch, finalMatch.item2.id, e)}
                   on:mouseenter={() =>
                     finalMatch.item2 &&
                     !finalMatch.winner_id &&
@@ -555,7 +611,7 @@
                         {#if match.winner_id}
                           <button
                             class="btn-clear-winner"
-                            on:click={() => clearWinner(match)}
+                            on:click={() => openClearWinnerModal(match)}
                             disabled={updatingMatch === match.id}
                             title="Clear winner to change selection"
                           >
@@ -571,10 +627,10 @@
                             : ''} {hoveredItemId === match.item1?.id
                             ? 'hovered'
                             : ''}"
-                          on:click={() =>
+                          on:click={(e) =>
                             match.item1 &&
                             !match.winner_id &&
-                            selectWinner(match, match.item1.id)}
+                            selectWinner(match, match.item1.id, e)}
                           on:mouseenter={() =>
                             match.item1 &&
                             !match.winner_id &&
@@ -605,10 +661,10 @@
                             : ''} {hoveredItemId === match.item2?.id
                             ? 'hovered'
                             : ''}"
-                          on:click={() =>
+                          on:click={(e) =>
                             match.item2 &&
                             !match.winner_id &&
-                            selectWinner(match, match.item2.id)}
+                            selectWinner(match, match.item2.id, e)}
                           on:mouseenter={() =>
                             match.item2 &&
                             !match.winner_id &&
@@ -739,6 +795,30 @@
     </div>
   {/if}
 </div>
+
+<!-- Reset Bracket Modal -->
+<ConfirmModal
+  bind:show={showResetModal}
+  title="Reset Bracket"
+  message="Are you sure you want to reset this bracket? All progress will be lost."
+  confirmText="Reset"
+  cancelText="Cancel"
+  confirmClass="btn-danger"
+  onConfirm={handleResetConfirm}
+  onCancel={handleResetCancel}
+/>
+
+<!-- Clear Winner Modal -->
+<ConfirmModal
+  bind:show={showClearWinnerModal}
+  title="Clear Match Winner"
+  message="Are you sure you want to clear this match winner? This will also remove any subsequent rounds that depend on this match."
+  confirmText="Clear"
+  cancelText="Cancel"
+  confirmClass="btn-danger"
+  onConfirm={handleClearWinnerConfirm}
+  onCancel={handleClearWinnerCancel}
+/>
 
 <style>
   .container {
@@ -1372,5 +1452,402 @@
   .bracket-center .champion-round {
     width: 100%;
     margin-top: 1rem;
+  }
+
+  /* Mobile Responsive Styles */
+  @media (max-width: 768px) {
+    .container {
+      padding: 1rem;
+      max-width: 100%;
+    }
+
+    header {
+      margin-bottom: 1.5rem;
+    }
+
+    .header-top {
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: stretch;
+    }
+
+    .btn-back,
+    .btn-reset {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      font-size: 1rem;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+    }
+
+    .topic {
+      font-size: 1rem;
+    }
+
+    .status-badge {
+      font-size: 0.8rem;
+      padding: 0.4rem 0.8rem;
+    }
+
+    /* Traditional bracket - make it scrollable horizontally on mobile */
+    .traditional-bracket {
+      padding: 0.5rem 0;
+      -webkit-overflow-scrolling: touch;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-behavior: smooth;
+      position: relative;
+      /* Add subtle gradient fade at edges to indicate scrollability */
+      mask-image: linear-gradient(
+        to right,
+        transparent,
+        black 10%,
+        black 90%,
+        transparent
+      );
+      -webkit-mask-image: linear-gradient(
+        to right,
+        transparent,
+        black 10%,
+        black 90%,
+        transparent
+      );
+    }
+
+
+    .bracket-container-horizontal {
+      gap: 0.5rem;
+      padding: 0 0.25rem;
+    }
+
+    .bracket-column {
+      min-width: 110px;
+    }
+
+    .bracket-column .round-title {
+      font-size: 0.75rem;
+      margin-bottom: 0.4rem;
+    }
+
+    .bracket-column .round-title.current-round {
+      font-size: 0.85rem;
+    }
+
+    .bracket-column .matches {
+      gap: 0.3rem;
+    }
+
+    .bracket-column .match {
+      padding: 0.25rem;
+      gap: 0.15rem;
+      font-size: 0.65rem;
+    }
+
+    .bracket-column .match-item {
+      padding: 0.25rem 0.3rem;
+      font-size: 0.6rem;
+      min-height: 38px; /* Touch target size */
+      display: flex;
+      align-items: center;
+      -webkit-tap-highlight-color: rgba(102, 126, 234, 0.2);
+    }
+
+    .bracket-column .match-item .seed {
+      font-size: 0.55rem;
+      padding: 0.06rem 0.2rem;
+      min-width: 1.3rem;
+    }
+
+    .bracket-column .match-item .name {
+      font-size: 0.6rem;
+    }
+
+    .bracket-column .vs {
+      font-size: 0.6rem;
+      padding: 0.1rem 0;
+    }
+
+    .bracket-final {
+      min-width: 130px;
+    }
+
+    .bracket-final .round-title {
+      font-size: 0.9rem;
+    }
+
+    .bracket-final .match {
+      padding: 0.5rem;
+      font-size: 0.75rem;
+    }
+
+    .bracket-final .match-item {
+      padding: 0.4rem 0.45rem;
+      font-size: 0.7rem;
+      min-height: 44px;
+      -webkit-tap-highlight-color: rgba(102, 126, 234, 0.2);
+    }
+
+    .bracket-final .match-item .seed {
+      font-size: 0.65rem;
+    }
+
+    .bracket-final .match-item .name {
+      font-size: 0.8rem;
+    }
+
+    .btn-clear-winner {
+      top: 0.15rem;
+      right: 0.15rem;
+      padding: 0.25rem 0.35rem;
+      font-size: 0.7rem;
+      min-width: 36px;
+      min-height: 36px;
+      -webkit-tap-highlight-color: rgba(220, 38, 38, 0.2);
+    }
+
+    .champion-title {
+      font-size: 1.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .champion-card {
+      padding: 1.5rem;
+      min-width: auto;
+      width: 100%;
+    }
+
+    .champion-name {
+      font-size: 1.5rem;
+    }
+
+    .champion-seed {
+      font-size: 0.9rem;
+      padding: 0.4rem 0.8rem;
+    }
+
+    .champion-label {
+      font-size: 0.9rem;
+    }
+  }
+
+  /* Small mobile devices */
+  @media (max-width: 480px) {
+    .container {
+      padding: 0.5rem;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+    }
+
+    .topic {
+      font-size: 0.9rem;
+    }
+
+    .bracket-container-horizontal {
+      gap: 0.4rem;
+    }
+
+    .bracket-column {
+      min-width: 85px;
+    }
+
+    .bracket-column .round-title {
+      font-size: 0.65rem;
+      margin-bottom: 0.3rem;
+    }
+
+    .bracket-column .round-title.current-round {
+      font-size: 0.75rem;
+    }
+
+    .bracket-column .matches {
+      gap: 0.25rem;
+    }
+
+    .bracket-column .match {
+      padding: 0.2rem;
+      font-size: 0.6rem;
+      gap: 0.12rem;
+    }
+
+    .bracket-column .match-item {
+      padding: 0.2rem 0.25rem;
+      font-size: 0.55rem;
+      min-height: 36px;
+    }
+
+    .bracket-column .match-item .seed {
+      font-size: 0.5rem;
+      padding: 0.04rem 0.15rem;
+      min-width: 1.1rem;
+    }
+
+    .bracket-column .match-item .name {
+      font-size: 0.55rem;
+    }
+
+    .bracket-column .vs {
+      font-size: 0.55rem;
+      padding: 0.08rem 0;
+    }
+
+    .bracket-final {
+      min-width: 110px;
+    }
+
+    .bracket-final .round-title {
+      font-size: 0.8rem;
+    }
+
+    .bracket-final .match {
+      padding: 0.35rem;
+      font-size: 0.7rem;
+    }
+
+    .bracket-final .match-item {
+      padding: 0.3rem 0.35rem;
+      font-size: 0.6rem;
+      min-height: 40px;
+    }
+
+    .bracket-final .match-item .seed {
+      font-size: 0.6rem;
+    }
+
+    .bracket-final .match-item .name {
+      font-size: 0.7rem;
+    }
+
+    .btn-clear-winner {
+      top: 0.1rem;
+      right: 0.1rem;
+      padding: 0.2rem 0.3rem;
+      font-size: 0.65rem;
+      min-width: 32px;
+      min-height: 32px;
+    }
+
+    .champion-title {
+      font-size: 1.25rem;
+    }
+
+    .champion-card {
+      padding: 1.25rem;
+    }
+
+    .champion-name {
+      font-size: 1.25rem;
+    }
+  }
+
+  /* Extra small mobile devices */
+  @media (max-width: 360px) {
+    .container {
+      padding: 0.4rem;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+    }
+
+    .topic {
+      font-size: 0.85rem;
+    }
+
+    .bracket-container-horizontal {
+      gap: 0.35rem;
+    }
+
+    .bracket-column {
+      min-width: 75px;
+    }
+
+    .bracket-column .round-title {
+      font-size: 0.6rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .bracket-column .round-title.current-round {
+      font-size: 0.7rem;
+    }
+
+    .bracket-column .matches {
+      gap: 0.2rem;
+    }
+
+    .bracket-column .match {
+      padding: 0.15rem;
+      font-size: 0.55rem;
+      gap: 0.08rem;
+    }
+
+    .bracket-column .match-item {
+      padding: 0.15rem 0.2rem;
+      font-size: 0.5rem;
+      min-height: 32px;
+    }
+
+    .bracket-column .match-item .seed {
+      font-size: 0.45rem;
+      padding: 0.03rem 0.12rem;
+      min-width: 0.9rem;
+    }
+
+    .bracket-column .match-item .name {
+      font-size: 0.5rem;
+    }
+
+    .bracket-column .vs {
+      font-size: 0.5rem;
+      padding: 0.06rem 0;
+    }
+
+    .bracket-final {
+      min-width: 100px;
+    }
+
+    .bracket-final .round-title {
+      font-size: 0.75rem;
+    }
+
+    .bracket-final .match {
+      padding: 0.3rem;
+      font-size: 0.65rem;
+    }
+
+    .bracket-final .match-item {
+      padding: 0.25rem 0.3rem;
+      font-size: 0.55rem;
+      min-height: 36px;
+    }
+
+    .bracket-final .match-item .seed {
+      font-size: 0.55rem;
+    }
+
+    .bracket-final .match-item .name {
+      font-size: 0.65rem;
+    }
+
+    .btn-clear-winner {
+      min-width: 26px;
+      min-height: 26px;
+      font-size: 0.55rem;
+      padding: 0.12rem 0.2rem;
+    }
+  }
+
+  /* Landscape mobile orientation */
+  @media (max-width: 768px) and (orientation: landscape) {
+    .bracket-column {
+      min-width: 150px;
+    }
+
+    .bracket-column .match-item {
+      min-height: 40px;
+    }
   }
 </style>
