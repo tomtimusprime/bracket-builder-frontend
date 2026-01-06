@@ -1,6 +1,8 @@
 const API_BASE_URL =
-  import.meta.env.PUBLIC_API_URL || 
-  (import.meta.env.DEV ? "http://localhost:3000/api" : "https://bracket-builder-backend.fly.dev/api");
+  import.meta.env.PUBLIC_API_URL ||
+  (import.meta.env.DEV
+    ? "http://localhost:3000/api"
+    : "https://bracket-builder-backend.fly.dev/api");
 
 export interface ItemResponse {
   id: string;
